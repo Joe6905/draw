@@ -31,14 +31,8 @@ service cloud.firestore {
     }
 
     match /rooms/{roomCode} {
-      // Anyone can read a room if they know the code
-      allow read: if true;
-      
-      // Authenticated users can create a room, but must be valid
-      allow create: if isAuthenticated() && isValidRoom(request.resource.data);
-      
-      // Authenticated users can update a room (add lines, save images)
-      allow update: if isAuthenticated() && isValidRoom(request.resource.data);
+      // Anyone can read, create, or update a room
+      allow read, create, update: if true;
       
       // Only creator can delete (if we had a creator field)
       allow delete: if false;

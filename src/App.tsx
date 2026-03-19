@@ -2,12 +2,12 @@ import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } f
 import { Stage, Layer, Line as KonvaLine } from 'react-konva';
 import { io, Socket } from 'socket.io-client';
 import { Line } from './types';
-import { Eraser, Pencil, Trash2, Users, LogOut, Copy, Check, Plus, LogIn, AlertCircle, Save, Image as ImageIcon, Moon, Sun, Undo, Redo } from 'lucide-react';
+import { Eraser, Pencil, Trash2, Users, LogOut, Copy, Check, Plus, AlertCircle, Save, Image as ImageIcon, Moon, Sun, Undo, Redo } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db, auth, signIn, storage } from './firebase';
+import { db, storage } from './firebase';
 import { doc, setDoc, getDoc, onSnapshot, updateDoc, arrayUnion, serverTimestamp, getDocFromServer } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { v4 as uuidv4 } from 'uuid';
 
 enum OperationType {
   CREATE = 'create',
@@ -38,21 +38,8 @@ interface FirestoreErrorInfo {
 }
 
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
+  const errInfo = {
     error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
     operationType,
     path
   }
@@ -127,13 +114,21 @@ function App() {
   const [strokeWidth, setStrokeWidth] = useState(5);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [copied, setCopied] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [savedImages, setSavedImages] = useState<any[]>([]);
   const [showGallery, setShowGallery] = useState(false);
   const [roomCreator, setRoomCreator] = useState<string | null>(null);
   const [redoStack, setRedoStack] = useState<Line[]>([]);
+
+  useEffect(() => {
+    let id = localStorage.getItem('dual-draw-user-id');
+    if (!id) {
+      id = uuidv4();
+      localStorage.setItem('dual-draw-user-id', id);
+    }
+    setUserId(id);
+  }, []);
 
   useEffect(() => {
     if (darkMode) {
@@ -161,14 +156,6 @@ function App() {
       }
     }
     testConnection();
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
-    });
-    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -237,10 +224,6 @@ function App() {
   }, [isJoined]);
 
   const handleCreateRoom = async () => {
-    if (!user) {
-      await signIn();
-      return;
-    }
     const newCode = generateRoomCode();
     const roomRef = doc(db, 'rooms', newCode);
     try {
@@ -248,7 +231,9 @@ function App() {
         roomCode: newCode,
         lines: [],
         createdAt: serverTimestamp(),
-        createdBy: user.uid
+        createdBy: userId,
+        redoStack: [],
+        savedImages: []
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `rooms/${newCode}`);
@@ -279,13 +264,13 @@ function App() {
   };
 
   const handleMouseDown = (e: any) => {
-    if (!isJoined || !user) return;
+    if (!isJoined || !userId) return;
     
     const stage = e.target.getStage();
     const pos = stage.getPointerPosition();
     
     // Determine if user is allowed to draw in this area
-    const isCreator = user.uid === roomCreator;
+    const isCreator = userId === roomCreator;
     const isTopHalf = pos.y < dimensions.height / 2;
     
     if (isCreator && !isTopHalf) return;
@@ -302,11 +287,11 @@ function App() {
   };
 
   const handleMouseMove = (e: any) => {
-    if (!isDrawing.current || !isJoined || !user || !roomCode) return;
+    if (!isDrawing.current || !isJoined || !userId || !roomCode) return;
     const stage = e.target.getStage();
     const point = stage.getPointerPosition();
     
-    const isCreator = user.uid === roomCreator;
+    const isCreator = userId === roomCreator;
     const midY = dimensions.height / 2;
     
     // Clamp Y coordinate to user's zone
@@ -428,7 +413,7 @@ function App() {
   };
 
   const handleSaveImage = async () => {
-    if (!stageRef.current || !user || !roomCode) return;
+    if (!stageRef.current || !roomCode) return;
     
     setIsSaving(true);
     try {
@@ -443,7 +428,7 @@ function App() {
         savedImages: arrayUnion({
           url: downloadUrl,
           timestamp: new Date().toISOString(),
-          savedBy: user.displayName || user.email || 'Anonymous'
+          savedBy: 'Anonymous'
         })
       });
       
@@ -461,14 +446,6 @@ function App() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-paper dark:bg-dark-paper flex items-center justify-center font-serif transition-colors">
-        <div className="animate-pulse text-olive dark:text-dark-olive">Loading...</div>
-      </div>
-    );
-  }
 
   if (!isJoined) {
     return (
@@ -493,55 +470,40 @@ function App() {
           <h1 className="text-3xl font-bold text-center text-ink dark:text-dark-ink mb-2">DualDraw</h1>
           <p className="text-center text-olive dark:text-dark-olive mb-8 italic">Collaborative canvas for two</p>
           
-          {!user ? (
-            <button
-              onClick={signIn}
-              className="w-full bg-olive dark:bg-dark-olive text-white dark:text-dark-paper py-3 rounded-xl font-semibold hover:bg-olive-dark dark:hover:bg-dark-olive-dark transition-colors flex items-center justify-center gap-2 mb-4"
-            >
-              <LogIn size={20} />
-              Sign in with Google
-            </button>
-          ) : (
-            <div className="space-y-6">
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={handleCreateRoom}
-                  className="w-full bg-olive dark:bg-dark-olive text-white dark:text-dark-paper py-4 rounded-xl font-semibold hover:bg-olive-dark dark:hover:bg-dark-olive-dark transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-                >
-                  <Plus size={24} />
-                  Create New Room
-                </button>
-                
-                <div className="relative flex items-center py-2">
-                  <div className="flex-grow border-t border-olive/10 dark:border-dark-olive/10"></div>
-                  <span className="flex-shrink mx-4 text-olive/40 dark:text-dark-olive/40 text-xs uppercase tracking-widest">or</span>
-                  <div className="flex-grow border-t border-olive/10 dark:border-dark-olive/10"></div>
-                </div>
-
-                <form onSubmit={handleJoinRoom} className="space-y-3">
-                  <input
-                    type="text"
-                    value={roomCode}
-                    onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                    placeholder="ENTER ROOM CODE"
-                    className="w-full px-4 py-3 rounded-xl border border-olive/20 dark:border-dark-olive/20 bg-white dark:bg-dark-paper text-ink dark:text-dark-ink focus:ring-2 focus:ring-olive dark:focus:ring-dark-olive focus:border-transparent outline-none transition-all font-mono text-center tracking-widest"
-                  />
-                  <button
-                    type="submit"
-                    className="w-full bg-white dark:bg-dark-paper text-olive dark:text-dark-olive border-2 border-olive dark:border-dark-olive py-3 rounded-xl font-semibold hover:bg-paper dark:hover:bg-dark-olive-light transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Users size={20} />
-                    Join Existing Room
-                  </button>
-                </form>
-              </div>
+          <div className="space-y-6">
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={handleCreateRoom}
+                className="w-full bg-olive dark:bg-dark-olive text-white dark:text-dark-paper py-4 rounded-xl font-semibold hover:bg-olive-dark dark:hover:bg-dark-olive-dark transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+              >
+                <Plus size={24} />
+                Create New Room
+              </button>
               
-              <div className="text-center">
-                <p className="text-xs text-olive/60 dark:text-dark-olive/60">Signed in as {user.displayName}</p>
-                <button onClick={() => auth.signOut()} className="text-[10px] text-red-600 uppercase tracking-widest mt-1 hover:underline">Sign Out</button>
+              <div className="relative flex items-center py-2">
+                <div className="flex-grow border-t border-olive/10 dark:border-dark-olive/10"></div>
+                <span className="flex-shrink mx-4 text-olive/40 dark:text-dark-olive/40 text-xs uppercase tracking-widest">or</span>
+                <div className="flex-grow border-t border-olive/10 dark:border-dark-olive/10"></div>
               </div>
+
+              <form onSubmit={handleJoinRoom} className="space-y-3">
+                <input
+                  type="text"
+                  value={roomCode}
+                  onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                  placeholder="ENTER ROOM CODE"
+                  className="w-full px-4 py-3 rounded-xl border border-olive/20 dark:border-dark-olive/20 bg-white dark:bg-dark-paper text-ink dark:text-dark-ink focus:ring-2 focus:ring-olive dark:focus:ring-dark-olive focus:border-transparent outline-none transition-all font-mono text-center tracking-widest"
+                />
+                <button
+                  type="submit"
+                  className="w-full bg-white dark:bg-dark-paper text-olive dark:text-dark-olive border-2 border-olive dark:border-dark-olive py-3 rounded-xl font-semibold hover:bg-paper dark:hover:bg-dark-olive-light transition-colors flex items-center justify-center gap-2"
+                >
+                  <Users size={20} />
+                  Join Existing Room
+                </button>
+              </form>
             </div>
-          )}
+          </div>
         </motion.div>
       </div>
     );
@@ -726,12 +688,12 @@ function App() {
           {/* Zone Indicators */}
           <div className="absolute top-4 right-4 pointer-events-none flex flex-col items-end gap-1 opacity-40">
             <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-olive dark:text-dark-olive">
-              {user?.uid === roomCreator ? "Your Zone (Top)" : "Partner's Zone (Top)"}
+              {userId === roomCreator ? "Your Zone (Top)" : "Partner's Zone (Top)"}
             </span>
           </div>
           <div className="absolute bottom-4 right-4 pointer-events-none flex flex-col items-end gap-1 opacity-40">
             <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-olive dark:text-dark-olive">
-              {user?.uid !== roomCreator ? "Your Zone (Bottom)" : "Partner's Zone (Bottom)"}
+              {userId !== roomCreator ? "Your Zone (Bottom)" : "Partner's Zone (Bottom)"}
             </span>
           </div>
 
