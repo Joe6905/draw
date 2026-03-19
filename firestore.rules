@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: rooms
+    // Document ID: roomCode (string)
+    // Fields:
+    //   - roomCode: string (required, unique)
+    //   - lines: list of objects (required, drawing state)
+    //   - createdAt: timestamp (required)
+    //   - createdBy: string (optional, UID)
+    //   - savedImages: list of objects (optional, snapshots)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isValidRoom(data) {
+      return data.keys().hasAll(['roomCode', 'lines', 'createdAt']) &&
+             data.roomCode is string &&
+             data.lines is list &&
+             data.createdAt is timestamp &&
+             (!('redoStack' in data) || data.redoStack is list) &&
+             (!('savedImages' in data) || data.savedImages is list);
+    }
+
+    match /rooms/{roomCode} {
+      // Anyone can read a room if they know the code
+      allow read: if true;
+      
+      // Authenticated users can create a room, but must be valid
+      allow create: if isAuthenticated() && isValidRoom(request.resource.data);
+      
+      // Authenticated users can update a room (add lines, save images)
+      allow update: if isAuthenticated() && isValidRoom(request.resource.data);
+      
+      // Only creator can delete (if we had a creator field)
+      allow delete: if false;
+    }
+  }
+}

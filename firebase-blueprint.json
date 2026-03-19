@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "room": {
+      "title": "Drawing Room",
+      "description": "A collaborative drawing room with its current state.",
+      "type": "object",
+      "properties": {
+        "roomCode": {
+          "type": "string",
+          "description": "Unique code for the room."
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tool": { "type": "string" },
+              "points": { "type": "array", "items": { "type": "number" } },
+              "color": { "type": "string" },
+              "strokeWidth": { "type": "number" }
+            }
+          },
+          "description": "The current drawing state of the room."
+        },
+        "redoStack": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tool": { "type": "string" },
+              "points": { "type": "array", "items": { "type": "number" } },
+              "color": { "type": "string" },
+              "strokeWidth": { "type": "number" }
+            }
+          },
+          "description": "The stack of undone actions for redo."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the room was created."
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "UID of the user who created the room."
+        },
+        "savedImages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": { "type": "string" },
+              "timestamp": { "type": "string", "format": "date-time" },
+              "savedBy": { "type": "string" }
+            }
+          },
+          "description": "Snapshots of the canvas saved to storage."
+        }
+      },
+      "required": ["roomCode", "lines", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/rooms/{roomCode}": {
+      "schema": "room",
+      "description": "Collection of drawing rooms indexed by their code."
+    }
+  }
+}

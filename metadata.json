@@ -1,0 +1,5 @@
+{
+  "name": "DualDraw Collaborative",
+  "description": "A real-time collaborative drawing app with room codes and dual-screen synchronization.",
+  "requestFramePermissions": []
+}
